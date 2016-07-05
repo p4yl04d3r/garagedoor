@@ -1,0 +1,9 @@
+sitemap home label="My Home"
+{
+        Frame label="Garage Doors" {
+                Text item=Door1
+                Switch item=Door1_Relay mappings=[ON="Go!"]
+                Text item=Door2
+                Switch item=Door2_Relay mappings=[ON="Go!"]
+        }
+}
