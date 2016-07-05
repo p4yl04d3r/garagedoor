@@ -17,13 +17,13 @@ volatile int state2 = 0;
 
 /* WIFI setup */
 const char* ssid     = "<ssid>";           /* WIFI SSID */
-const char* password = "<password>";     /* WIFI password */
+const char* password = "<password>";       /* WIFI password */
 
 /* MQTT setup */
-const char* mqtt_server ="<mqtt_server_IP>";
-const char* topic_garage1 = "<Status_topic1>";
-const char* topic_garage2 = "<Status_topic2>";
-const char* topic_button = "<button_topic>";
+const char* mqtt_server ="<mqtt_server_IP>";             /* Set to the IP of your MQTT broker */
+const char* topic_garage1 = "OpenHab/garage/status1";    /* Garage door1 status topic */
+const char* topic_garage2 = "OpenHab/garage/status2";    /* Garage door2 status topic */
+const char* topic_button = "OpenHab/garage/button";      /* Door button topic */
 /***********************************************************************************/
 WiFiClient espClient;
 PubSubClient client(espClient);
