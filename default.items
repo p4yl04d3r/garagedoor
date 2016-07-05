@@ -1,0 +1,5 @@
+String Door1 "Door1 Status [%s]"  <garagedoor1> (Sensors) {mqtt="<[mosquitto:OpenHab/garage/status1:state:default]"}
+Switch Door1_Relay "Garage Door1" <garagedoor1> (All) {mqtt=">[mosquitto:OpenHab/garage/button:command:ON:open1]"}
+
+String Door2 "Door2 Status [%s]" <garagedoor2> (Sensors) {mqtt="<[mosquitto:OpenHab/garage/status2:state:default]"}
+Switch Door2_Relay "Garage Door2" <garagedoor2> (All) {mqtt=">[mosquitto:OpenHab/garage/button:command:ON:open2]"}
