@@ -1,10 +1,20 @@
 /*
- * Garage door controller in arduino
- * Board ESP12-E NodeMCU 1.0
+ * Garage door controller in arduino on ESP8266
+ * Compile with Board ESP12-E NodeMCU 1.0
+ * 
+ * Arduino IDE: 1.6.9
+ * Required Libraries:
+ *    Time and TimeAlarms 1.5.0
+ *    PubSubClient 2.6.0
+ * Board manager:
+ *    esp8266 2.3.0
  */
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-//ADC_MODE(ADC_VCC);   /* Setup ADC pin to read VCC voltage (broken in current CC */
+#include <TimeLib.h>
+#include <TimeAlarms.h>
+ADC_MODE(ADC_VCC);          /* Setup ADC pin to read VCC voltage (broken in current CC */
+int debug = 0;              /* Set this to 1 for serial debug output */
 /* Configure GPIO */
 const int led     = 5;      /* GPIO5 connect to LED */
 const int garage1 = 4;      /* GPIO4  connect to garage door1 sense switch */
@@ -12,18 +22,20 @@ const int garage2 = 13;     /* GPIO13 connect to garage door2 sense switch */
 const int button1 = 14;     /* GPIO14 connect to garage door1 openner button */
 const int button2 = 12;     /* GPIO12 connect to garage door2 openner button */
 
-volatile int state1 = 0;
-volatile int state2 = 0;
+String door1="unknown";     /* Initial state of door1 */
+String door2="unknown";     /* Initial state of door2 */
+volatile int state1 = 0;    /* Initial door1 state */
+volatile int state2 = 0;    /* Initial door2 state */
 
 /* WIFI setup */
-const char* ssid     = "<ssid>";           /* WIFI SSID */
-const char* password = "<password>";       /* WIFI password */
+const char* ssid     = "<ssid>";         /* WIFI SSID */
+const char* password = "<password>";     /* WIFI password */
 
 /* MQTT setup */
-const char* mqtt_server ="<mqtt_broker_IP>";             /* Set to the IP of your MQTT broker */
-const char* topic_garage1 = "OpenHab/garage/status1";    /* Garage door1 status topic */
-const char* topic_garage2 = "OpenHab/garage/status2";    /* Garage door2 status topic */
-const char* topic_button = "OpenHab/garage/button";      /* Door button topic */
+const char* mqtt_server = "<mqtt server>";             /* IP of mqtt server */
+const char* topic_garage1 = "<door1 status topic>";    /* Topic for door1 status */
+const char* topic_garage2 = "<door2 status topic>";    /* Topic for door2 status */
+const char* topic_button = "<door button topic>";      /* Subscribed topic for garage door button */
 /***********************************************************************************/
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -42,35 +54,37 @@ void setup() {
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
   float vdd = ESP.getVcc() / 1000.0;  /* Read VCC voltage */
-  Serial.print("Voltage: ");
-  Serial.println(vdd);
-  state1 = digitalRead(garage1);
-  state2 = digitalRead(garage2);
+  debug and Serial.print("Voltage: ");
+  debug and Serial.println(vdd);
+  state1 = digitalRead(garage1);                    // Initial door1 state
+  state2 = digitalRead(garage2);                    // Initial door2 state
+  Alarm.timerOnce(10, MQTT_RECONNECT);              // Connect 10 seconds after startup
+  Alarm.timerRepeat(300, MQTT_RECONNECT);            // Check connection to MQTT server every 5 minutes.
+  Alarm.timerRepeat(900, MQTT_PUBLISH);             // Send door state every 15 minutes.
 }
 
 void setup_wifi() {
   delay(10);
   // We start by connecting to a WiFi network
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.mode(WIFI_STA);
+  debug and Serial.println();
+  debug and Serial.print("Connecting to ");
+  debug and Serial.println(ssid);
+  WiFi.mode(WIFI_STA);         /* Client only */
   WiFi.begin(ssid, password);
-
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
+  debug and Serial.println("");
+  debug and Serial.println("WiFi connected");
+  debug and Serial.println("IP address: ");
+  debug and Serial.println(WiFi.localIP());
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived: [");
-  Serial.print(topic);
-  Serial.print(" ]");
+  debug and Serial.print(topic);
+  debug and Serial.print(" ]");
   char *payload_string = (char *) payload;
   payload_string[length] ='\0';
   Serial.println(payload_string);
@@ -78,74 +92,72 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // Open door1 if payload says "open1"
   if (strcmp(payload_string,"open1") == 0) {
     digitalWrite(button1, LOW);   // Toggle Relay for 2 seconds
-    delay(1100);
+    Alarm.delay(1100);
     digitalWrite(button1, HIGH);  // Relay is normaly open on HIGH
   }
   // Open door2 if payload says "open2"
   if (strcmp(payload_string,"open2") == 0) {
     digitalWrite(button2, LOW);   // Toggle Relay for 2 seconds
-    delay(1100);
+    Alarm.delay(1100);
     digitalWrite(button2, HIGH);  // Relay is normaly open on HIGH
   }
 }
 
-void reconnect() {
-  // Loop until we're reconnected
-  while (!client.connected()) {
-    Serial.print("Attempting MQTT connection...");
-    // Attempt to connect
-    // If you do not want to use a username and password, change next line to
+void MQTT_PUBLISH() {
+  client.publish(topic_garage1, (char *) door1.c_str());
+  client.publish(topic_garage2, (char *) door2.c_str());
+}
+
+void MQTT_RECONNECT() {
+  debug and Serial.println("Check MQTT connection...");
+  if (!client.connected()) {
     if (client.connect("ESP8266Client")) {
-      Serial.println("connected");
-      client.subscribe(topic_button);
+      debug and Serial.println(" Connected");
+      client.subscribe(topic_button);   // Attempt to subscribe to topic
+      MQTT_PUBLISH();                   // Publish door status if we have to reconnect because server may not maintain state.
     } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
-      delay(5000);
+      debug and Serial.print("failed, rc=");
+      debug and Serial.println(client.state());
     }
+  } else {
+    debug and Serial.println(" Already Connected");
   }
 }
-  
-void loop() {
-  if (!client.connected()) {
-     delay(10);
-    /* 
-     *  If we lose connection to the Broker then there is a good chance it lost state.
-     *  Reset the state of the doors.
-     */
-     state1 = digitalRead(garage1);
-     state2 = digitalRead(garage2);
-     reconnect();
-  }
-  client.loop();
 
+void loop() {
+  client.loop();
   // Status LED
   if ((digitalRead(garage1) == HIGH) || (digitalRead(garage2) == HIGH)) {
     digitalWrite(led, HIGH);
   } else {
     digitalWrite(led, LOW);
   }
-  if ((digitalRead(garage2) == HIGH) && (state2 == 1)) {
-    client.publish(topic_garage2, "open");
-    Serial.println("Door2 is open");
-    state2 = 0;
-  }
-  if ((digitalRead(garage2) == LOW) && (state2 == 0)) {
-    client.publish(topic_garage2, "closed");
-    Serial.println("Door2 is closed");
-    state2 = 1;
-  }
+  /* Door 1 */
   if ((digitalRead(garage1) == HIGH) && (state1 == 1)) {
-    client.publish(topic_garage1, "open");
-    Serial.println("Door1 is open");
+    door1="open";
+    client.publish(topic_garage1, (char *) door1.c_str());
+    debug and Serial.println("Door1 is open");
     state1 = 0;
   } 
   if ((digitalRead(garage1) == LOW) && (state1 == 0)) {
-    client.publish(topic_garage1, "closed");
-    Serial.println("Door1 is closed");    
+    door1="closed";
+    client.publish(topic_garage1, (char *) door1.c_str());
+    debug and Serial.println("Door1 is closed");    
     state1 = 1;
   }
-  delay(20);
+  /* Door 2 */
+  if ((digitalRead(garage2) == HIGH) && (state2 == 1)) {
+    door2="open";
+    client.publish(topic_garage2, (char *) door2.c_str());
+    debug and Serial.println("Door2 is open");
+    state2 = 0;
+  }
+  if ((digitalRead(garage2) == LOW) && (state2 == 0)) {
+    door2="closed";
+    client.publish(topic_garage2, (char *) door2.c_str());
+    debug and Serial.println("Door2 is closed");
+    state2 = 1;
+  }
+  Alarm.delay(20);
+  ESP.wdtFeed();
 }
