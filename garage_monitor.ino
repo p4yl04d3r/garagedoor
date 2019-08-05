@@ -2,18 +2,18 @@
  * Garage door controller in arduino on ESP8266
  * Compile with Board ESP12-E NodeMCU 1.0
  * 
- * Arduino IDE: 1.6.9
+ * Arduino IDE: 1.8.9
  * Required Libraries:
  *    Time and TimeAlarms 1.5.0
  *    PubSubClient 2.6.0
  * Board manager:
- *    esp8266 2.3.0
+ *    esp8266 2.5,2
  */
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <TimeLib.h>
 #include <TimeAlarms.h>
-ADC_MODE(ADC_VCC);          /* Setup ADC pin to read VCC voltage (broken in current CC */
+
 int debug = 0;              /* Set this to 1 for serial debug output */
 /* Configure GPIO */
 const int led     = 5;      /* GPIO5 connect to LED */
@@ -28,14 +28,14 @@ volatile int state1 = 0;    /* Initial door1 state */
 volatile int state2 = 0;    /* Initial door2 state */
 
 /* WIFI setup */
-const char* ssid     = "<ssid>";         /* WIFI SSID */
-const char* password = "<password>";     /* WIFI password */
+const char* ssid     = "your_wifi_ssid";         /* WIFI SSID */
+const char* password = "your_wifi_password";     /* WIFI password */
 
 /* MQTT setup */
-const char* mqtt_server = "<mqtt server>";             /* IP of mqtt server */
-const char* topic_garage1 = "<door1 status topic>";    /* Topic for door1 status */
-const char* topic_garage2 = "<door2 status topic>";    /* Topic for door2 status */
-const char* topic_button = "<door button topic>";      /* Subscribed topic for garage door button */
+const char* mqtt_server = "xxx.xxx.xxx.xxx";            /* IP of mqtt server */
+const char* topic_garage1 = "OpenHab/garage/status1";   /* Topic for door1 status */
+const char* topic_garage2 = "OpenHab/garage/status2";   /* Topic for door2 status */
+const char* topic_button = "OpenHab/garage/button";     /* Subscribed topic for garage door button */
 /***********************************************************************************/
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -65,15 +65,24 @@ void setup() {
 
 void setup_wifi() {
   delay(10);
+  WiFi.disconnect();
   // We start by connecting to a WiFi network
   debug and Serial.println();
   debug and Serial.print("Connecting to ");
   debug and Serial.println(ssid);
   WiFi.mode(WIFI_STA);         /* Client only */
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+  int retries = 0;
+  int tries = 60;
+  //Wait for Wifi connection for 5 minutes before resetting ESP.
+  while ((WiFi.status() != WL_CONNECTED) && (retries < tries)) {
+    retries++;
+    delay(5000);
     Serial.print(".");
+  } 
+  if (retries >= tries) {
+    Serial.print("Reset ESP, No wifi");
+    ESP.restart();
   }
   debug and Serial.println("");
   debug and Serial.println("WiFi connected");
@@ -110,7 +119,12 @@ void MQTT_PUBLISH() {
 
 void MQTT_RECONNECT() {
   debug and Serial.println("Check MQTT connection...");
-  if (!client.connected()) {
+  int retries = 0;
+  int tries = 12;
+  // Loop every 5 seconds until MQTT broker is connected. After 1 minute check Wifi.
+  while ((!client.connected()) && (retries < tries)) { 
+    retries++;
+    debug and Serial.print("Attempting MQTT connection... ");
     if (client.connect("ESP8266Client")) {
       debug and Serial.println(" Connected");
       client.subscribe(topic_button);   // Attempt to subscribe to topic
@@ -118,9 +132,15 @@ void MQTT_RECONNECT() {
     } else {
       debug and Serial.print("failed, rc=");
       debug and Serial.println(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
     }
-  } else {
-    debug and Serial.println(" Already Connected");
+  }
+  // Reconnect to wifi if we cannot get to MQTT Broker
+  if (retries >= tries) {
+    Serial.println("Could not establish MQTT connection. Reconnect WiFi.");
+    setup_wifi();
   }
 }
 
